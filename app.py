@@ -5,68 +5,66 @@ import pandas as pd
 st.set_page_config(page_title="Moment Dashboard", layout="wide")
 st.title("📊 Moment Live Dashboard")
 
-# Ton ID d'organisation
 ORG_ID = "66acb9607b37c536d8f0d5ed"
-
-# Authentification
-API_KEY = st.sidebar.text_input("Clé API Organisation (key_org_...)", type="password").strip()
+API_KEY = st.sidebar.text_input("Clé API Organisation", type="password").strip()
 
 if API_KEY:
-    # Changement d'URL : On utilise le domaine Vivenu pur, car c'est là que vivent les données
-    # même pour les comptes "Moment".
-    url = "https://vivenu.com/api/v1/manager/events"
+    # Les 3 seules URLs qui peuvent techniquement fonctionner pour une organisation Vivenu/Moment
+    endpoints = [
+        "https://vivenu.com/api/v1/manager/events",        # API Standard
+        "https://vivenu.com/api/v1/managers/events",       # API Standard (pluriel)
+        "https://api.vivenu.com/v1/manager/events"         # API Développeur
+    ]
     
-    # Très important : Vivenu exige parfois l'ID d'organisation dans les headers ET les params
     headers = {
         "X-Api-Key": API_KEY,
-        "Accept": "application/json",
-        "X-Organization-Id": ORG_ID  # Header spécifique à Vivenu
+        "X-Organization-Id": ORG_ID, # On force l'ID ici
+        "Accept": "application/json"
     }
     
     params = {"organization": ORG_ID}
     
-    try:
-        res = requests.get(url, headers=headers, params=params)
-        
-        # Si 404 sur vivenu.com, on tente une dernière fois sur l'API "v2" de Moment
-        if res.status_code == 404:
-            url_moment = "https://dashboard.moment.is/api/v1/managers/events"
-            res = requests.get(url_moment, headers=headers)
+    found = False
+    for url in endpoints:
+        try:
+            res = requests.get(url, headers=headers, params=params)
+            # Si échec, on tente avec le format Bearer sur la même URL
+            if res.status_code != 200:
+                auth_headers = {"Authorization": f"Bearer {API_KEY}", "Accept": "application/json"}
+                res = requests.get(url, headers=auth_headers, params=params)
 
-        if res.status_code == 200:
-            data = res.json()
-            events = data.get('data', []) if isinstance(data, dict) else data
-            
-            if events:
-                rows = []
-                for e in events:
-                    rows.append({
-                        "Événement": e.get('name', 'N/A'),
+            if res.status_code == 200:
+                data = res.json()
+                events = data.get('data', [])
+                if events:
+                    df = pd.DataFrame([{
+                        "Événement": e.get('name'),
                         "Vendus": e.get('ticketsSold', 0),
-                        "CA (€)": e.get('revenue', 0) / 100,
-                        "Capacité": e.get('capacity', 0)
-                    })
-                
-                df = pd.DataFrame(rows)
+                        "CA (€)": e.get('revenue', 0) / 100
+                    } for e in events])
+                    
+                    st.success(f"Connecté avec succès via {url.split('/')[2]} !")
+                    c1, c2 = st.columns(2)
+                    c1.metric("Billets Vendus", int(df['Vendus'].sum()))
+                    c2.metric("CA Total", f"{df['CA (€)'].sum():,.2f} €")
+                    st.divider()
+                    st.bar_chart(df.set_index("Événement")["Vendus"])
+                    st.dataframe(df, use_container_width=True)
+                    found = True
+                    break
+        except:
+            continue
 
-                # --- DASHBOARD ---
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Billets Vendus", int(df['Vendus'].sum()))
-                c2.metric("CA Total", f"{df['CA (€)'].sum():,.2f} €")
-                c3.metric("Événements", len(df))
-
-                st.divider()
-                st.subheader("Ventes par événement")
-                st.bar_chart(df.set_index("Événement")["Vendus"])
-                st.dataframe(df.sort_values(by="Vendus", ascending=False), use_container_width=True)
-            else:
-                st.info("Connexion réussie ! Aucun événement n'a pu être récupéré.")
-        else:
-            st.error(f"Erreur {res.status_code}")
-            st.warning("Le serveur refuse l'accès ou la route est incorrecte.")
-            st.write("Astuce : Vérifie que ta clé API a bien été créée au niveau 'Organisation' sur dashboard.moment.is/apikeys")
-            
-    except Exception as e:
-        st.error(f"Erreur technique : {e}")
+    if not found:
+        st.error("Routes API épuisées (404/401).")
+        st.info("""
+        ### 💡 Vérification ultime sur ton compte Moment :
+        1. Va sur **dashboard.moment.is/apikeys**.
+        2. Clique sur ta clé.
+        3. Regarde bien la liste des **Permissions**.
+        4. Est-ce que **"Managers"** ou **"Events"** est coché ?
+        
+        Si tu ne peux pas modifier les permissions, c'est que la clé n'a pas le droit "Lecture".
+        """)
 else:
-    st.info("👈 Entre ta clé API Organisation (Secret Key) pour commencer.")
+    st.info("👈 Entre ta clé API pour scanner les serveurs.")
