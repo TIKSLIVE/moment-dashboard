@@ -2,38 +2,72 @@ import streamlit as st
 import requests
 import pandas as pd
 
-st.set_page_config(page_title="Diagnostic Vivenu", layout="wide")
-st.title("🔍 Diagnostic de Connexion Vivenu")
+st.set_page_config(page_title="Vivenu Live Dashboard", layout="wide")
+st.title("📊 Dashboard Live Vivenu")
 
-API_KEY = st.sidebar.text_input("Clé API Vivenu", type="password")
+# Nettoyage de la clé pour éviter les erreurs d'espaces
+api_input = st.sidebar.text_input("Clé API Vivenu", type="password")
+API_KEY = api_input.strip() if api_input else None
 
 if API_KEY:
-    # On teste l'URL la plus probable
-    url = "https://vivenu.com/api/v1/manager/events"
+    # Cette URL est celle utilisée par les dashboards de gestion récents
+    url = "https://vivenu.com/api/v1/managers/events"
+    
     headers = {
         "X-Api-Key": API_KEY,
+        "Content-Type": "application/json",
         "Accept": "application/json"
     }
     
     try:
+        # On tente l'appel
         response = requests.get(url, headers=headers)
         
-        # ZONE DE DIAGNOSTIC
-        st.subheader("Résultat du test :")
         if response.status_code == 200:
-            st.success("✅ Connexion réussie !")
-            st.json(response.json()) # Affiche les données brutes
-        elif response.status_code == 401:
-            st.error("❌ Erreur 401 : Clé API non valide ou expirée.")
-        elif response.status_code == 403:
-            st.error("❌ Erreur 403 : Votre clé n'a pas les droits suffisants (Permissions).")
-        elif response.status_code == 404:
-            st.error("❌ Erreur 404 : L'adresse de l'API n'est pas la bonne pour votre compte.")
+            data = response.json()
+            # On cherche les événements dans 'data' ou directement à la racine
+            events_list = data.get('data', data if isinstance(data, list) else [])
+            
+            if events_list:
+                summary = []
+                for e in events_list:
+                    # Extraction sécurisée des données
+                    name = e.get('name', 'Sans nom')
+                    sold = e.get('ticketsSold', 0)
+                    cap = e.get('capacity', 0)
+                    rev = e.get('revenue', 0) / 100
+                    
+                    summary.append({
+                        "Événement": name,
+                        "Vendus": sold,
+                        "Capacité": cap,
+                        "CA (€)": rev
+                    })
+                
+                df = pd.DataFrame(summary)
+
+                # Affichage des compteurs
+                c1, c2 = st.columns(2)
+                c1.metric("Billets vendus", int(df['Vendus'].sum()))
+                c2.metric("Total CA", f"{df['CA (€)'].sum():,.2f} €")
+
+                st.divider()
+                st.bar_chart(df.set_index("Événement")["Vendus"])
+                st.dataframe(df, use_container_width=True)
+            else:
+                st.warning("Connexion réussie mais la liste des événements est vide.")
+                st.write("Réponse brute de l'API :", data) # Pour comprendre la structure
+                
         else:
-            st.error(f"❌ Erreur {response.status_code}")
-            st.write("Message de Vivenu :", response.text)
+            st.error(f"Erreur {response.status_code}")
+            st.info("Tentative avec une URL alternative...")
+            
+            # TENTATIVE B : URL simplifiée
+            alt_url = "https://api.vivenu.com/v1/events" # Parfois utilisé sur certaines versions
+            alt_res = requests.get(alt_url, headers=headers)
+            st.write(f"Test URL Alternative : {alt_res.status_code}")
 
     except Exception as e:
         st.error(f"Erreur technique : {e}")
 else:
-    st.info("Entrez votre clé API à gauche.")
+    st.info("👈 Entrez votre clé API (Level Organisation de préférence) dans la barre latérale.")
