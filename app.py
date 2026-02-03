@@ -2,62 +2,71 @@ import streamlit as st
 import requests
 import pandas as pd
 
-st.set_page_config(page_title="Moment Dashboard", layout="wide")
-st.title("📊 Dashboard Live Moment (Vivenu)")
+st.set_page_config(page_title="Dashboard Moment Live", layout="wide")
 
-# Nettoyage de la clé
-api_input = st.sidebar.text_input("Clé API (Level Organisation)", type="password")
+# Interface
+st.title("🎟️ Moment Live Sales")
+api_input = st.sidebar.text_input("Clé API Organisation", type="password")
 API_KEY = api_input.strip() if api_input else None
 
 if API_KEY:
-    # Changement crucial : on utilise votre domaine dédié
-    url = "https://dashboard.moment.is/api/v1/managers/events"
+    # On revient sur l'API centrale qui distribue les données pour Moment
+    url = "https://vivenu.com/api/v1/managers/events"
     
     headers = {
         "X-Api-Key": API_KEY,
-        "Accept": "application/json"
+        "Accept": "application/json",
+        "Content-Type": "application/json"
     }
     
     try:
-        response = requests.get(url, headers=headers)
+        # On tente de récupérer les données
+        res = requests.get(url, headers=headers)
         
-        if response.status_code == 200:
-            data = response.json()
-            # Sur certains domaines custom, la structure peut être dans 'data' ou à la racine
-            events_list = data.get('data', []) if isinstance(data, dict) else data
+        if res.status_code == 200:
+            data = res.json()
+            events = data.get('data', [])
             
-            if events_list:
-                summary = []
-                for e in events_list:
-                    summary.append({
-                        "Événement": e.get('name', 'N/A'),
-                        "Vendus": e.get('ticketsSold', 0),
-                        "Capacité": e.get('capacity', 0),
-                        "CA (€)": e.get('revenue', 0) / 100 
-                    })
-                
-                df = pd.DataFrame(summary)
+            if events:
+                # Extraction des données
+                df = pd.DataFrame([{
+                    "Nom": e.get('name'),
+                    "Vendus": e.get('ticketsSold', 0),
+                    "CA (€)": e.get('revenue', 0) / 100,
+                    "Capacité": e.get('capacity', 0)
+                } for e in events])
 
-                # Chiffres clés
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Billets vendus", int(df['Vendus'].sum()))
-                c2.metric("Total CA", f"{df['CA (€)'].sum():,.2f} €")
-                c3.metric("Taux d'occupation", f"{(df['Vendus'].sum() / df['Capacité'].sum() * 100) if df['Capacité'].sum() > 0 else 0:.1f}%")
+                # Affichage des chiffres en gros
+                c1, c2 = st.columns(2)
+                c1.metric("Billets Vendus", int(df['Vendus'].sum()))
+                c2.metric("CA Total", f"{df['CA (€)'].sum():,.2f} €")
 
                 st.divider()
-                st.subheader("Ventes par Événement")
-                st.bar_chart(df.set_index("Événement")["Vendus"])
                 
-                st.subheader("Détails")
-                st.dataframe(df, use_container_width=True)
+                # Graphique et Tableau
+                st.subheader("Ventes par événement")
+                st.bar_chart(df.set_index("Nom")["Vendus"])
+                st.table(df)
             else:
-                st.info("Connexion réussie ! Mais aucun événement n'est remonté. Vérifiez que vos événements sont bien publiés.")
+                st.info("Aucun événement actif trouvé.")
+        
+        elif res.status_code == 404:
+            # Si 404, on tente la version SANS le 's' à managers
+            alt_url = "https://vivenu.com/api/v1/manager/events"
+            res_alt = requests.get(alt_url, headers=headers)
+            if res_alt.status_code == 200:
+                st.success("Connecté via URL alternative !")
+                # (Répéter la logique d'affichage ici ou rafraîchir)
+                st.rerun()
+            else:
+                st.error("Erreur 404 persistante. Votre clé API ne semble pas autorisée à lister les événements via l'API publique.")
+                st.info("Vérifiez sur Moment > Settings > API que votre clé a bien les droits 'MANAGER'.")
+        
         else:
-            st.error(f"Erreur {response.status_code}")
-            st.write("Détails de l'erreur :", response.text)
-            st.info("Essayez avec l'URL alternative si l'erreur est 404...")
-            
+            st.error(f"Erreur {res.status_code}")
+            st.write("Détails :", res.text)
+
     except Exception as e:
-        st.error(f"Erreur technique : {e}")
+        st.error(f"Erreur de connexion : {e}")
 else:
-    st.info("👈 Entrez votre clé API Moment dans la barre latérale.")
+    st.info("Veuillez saisir votre Clé API dans la barre latérale.")
