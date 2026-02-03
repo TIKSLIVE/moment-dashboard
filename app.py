@@ -2,62 +2,61 @@ import streamlit as st
 import requests
 import pandas as pd
 
-# Configuration de la page
-st.set_page_config(page_title="Live Vivenu Dashboard", layout="wide")
-st.title("📊 Suivi des Ventes Vivenu en Temps Réel")
+st.set_page_config(page_title="Vivenu Live Dashboard", layout="wide")
+st.title("📊 Dashboard Live Vivenu")
 
-# --- CONFIGURATION ---
-# Remplacez par votre clé API ou utilisez les "Secrets" de Streamlit
-API_KEY = st.sidebar.text_input("Entrez votre Clé API Vivenu", type="password")
+# Barre latérale pour la clé API
+API_KEY = st.sidebar.text_input("Clé API Vivenu", type="password")
 
 if API_KEY:
-    headers = {"X-Api-Key": API_KEY}
-    
-    # Appel à l'API Vivenu pour récupérer les événements
-    url = "https://vivenu.com/api/v1/managers/events"
+    # L'URL "manager" sans le 's' à la fin de 'v1' et avec le bon chemin
+    url = "https://vivenu.com/api/v1/manager/events"
+    headers = {
+        "X-Api-Key": API_KEY,
+        "Accept": "application/json"
+    }
     
     try:
         response = requests.get(url, headers=headers)
-        data = response.json()
-        st.write(data) # Cette ligne affichera le message brut de Vivenu sur votre écran
         
-        # Transformation des données pour le dashboard
-        events = data.get('data', [])
-        
-        if events:
-            # Création d'une liste propre
-            summary = []
-            for e in events:
-                summary.append({
-                    "Événement": e.get('name'),
-                    "Vendus": e.get('ticketsSold'),
-                    "Capacité": e.get('capacity'),
-                    "Revenus (€)": e.get('revenue') / 100 # Vivenu compte souvent en centimes
-                })
+        if response.status_code == 200:
+            data = response.json()
+            # Vivenu renvoie souvent les données dans une liste 'data'
+            events_list = data.get('data', [])
             
-            df = pd.DataFrame(summary)
+            if events_list:
+                # Préparation des données
+                summary = []
+                for e in events_list:
+                    summary.append({
+                        "Nom": e.get('name'),
+                        "Vendus": e.get('ticketsSold', 0),
+                        "Capacité": e.get('capacity', 0),
+                        # Le revenu est souvent en centimes, on divise par 100
+                        "CA (€)": e.get('revenue', 0) / 100 
+                    })
+                
+                df = pd.DataFrame(summary)
 
-            # --- AFFICHAGE ---
-            # 1. Chiffres clés en haut
-            total_vendus = df['Vendus'].sum()
-            total_rev = df['Revenus (€)'].sum()
-            
-            col1, col2 = st.columns(2)
-            col1.metric("Total Billets Vendus", total_vendus)
-            col2.metric("Chiffre d'Affaires Total", f"{total_rev} €")
+                # --- AFFICHAGE ---
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Billets vendus", int(df['Vendus'].sum()))
+                col2.metric("Chiffre d'Affaires Total", f"{df['CA (€)'].sum():,.2f} €")
+                col3.metric("Nombre d'Événements", len(df))
 
-            # 2. Graphique simple
-            st.subheader("Ventes par Événement")
-            st.bar_chart(df.set_index("Événement")["Vendus"])
+                st.divider()
 
-            # 3. Tableau détaillé
-            st.subheader("Détails des Événements")
-            st.dataframe(df, use_container_width=True)
-            
+                st.subheader("Ventes par Événement")
+                st.bar_chart(df.set_index("Nom")["Vendus"])
+
+                st.subheader("Détail complet")
+                st.table(df)
+            else:
+                st.info("Connexion réussie, mais aucun événement n'est listé sur ce compte.")
         else:
-            st.warning("Aucun événement trouvé sur ce compte.")
+            st.error(f"Erreur {response.status_code} : {response.text}")
             
     except Exception as e:
-        st.error(f"Erreur de connexion : {e}")
+        st.error(f"Une erreur est survenue : {e}")
 else:
-    st.info("Veuillez entrer votre clé API dans la barre latérale pour voir les données.")
+    st.info("👈 Veuillez entrer votre clé API dans la barre latérale pour commencer.")
