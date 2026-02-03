@@ -19,6 +19,7 @@ if API_KEY:
     try:
         response = requests.get(url, headers=headers)
         data = response.json()
+        st.write(data) # Cette ligne affichera le message brut de Vivenu sur votre écran
         
         # Transformation des données pour le dashboard
         events = data.get('data', [])
